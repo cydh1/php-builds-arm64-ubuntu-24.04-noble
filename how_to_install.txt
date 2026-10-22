@@ -1,0 +1,157 @@
+PHP ARM64 packages for Ubuntu 24.04 (Noble)
+=========================================
+
+UNOFFICIAL community-built packages. These are not official PHP, Ubuntu,
+Launchpad, or Sury binary releases. No upstream endorsement is implied.
+Built from Ondrej Sury's Ubuntu PHP source packaging on an ARM64 builder.
+These files are not individually signed, and this folder is not a signed
+APT repository. SHA256SUMS is an integrity manifest, not an identity proof.
+
+Included PHP source-package versions:
+  8.1: 8.1.34-9+ubuntu24.04.1+deb.sury.org+1 (backported fixes)
+  8.2: 8.2.35-1+ubuntu24.04.1+deb.sury.org+1
+  8.3: 8.3.36-1+ubuntu24.04.1+deb.sury.org+1
+  8.4: 8.4.27-1+ubuntu24.04.1+deb.sury.org+1
+  8.5: 8.5.12-1+ubuntu24.04.1+deb.sury.org+1
+
+Prepared for CVE-2026-109618 and CVE-2026-109619.
+PHP 8.1's version number stays 8.1.34 because its fixes are backported in
+package revision -9. PHP 8.1 is no longer supported by the PHP project.
+Official advisory: https://www.php.net/archive/2026.php#2026-10-20-1
+Packaging project: https://deb.sury.org/
+
+Compatibility
+-------------
+Only use on Ubuntu 24.04 Noble ARM64, with compatible package dependencies.
+The folders also contain Architecture: all packages belonging to that build.
+Do not use on amd64/x86_64, 32-bit ARM, Debian, or another Ubuntu release.
+These update system PHP packages. They do not patch PHP inside Docker images
+or PHP embedded in FrankenPHP or another standalone application binary.
+Existing PECL extensions, such as Redis and igbinary, are not rebuilt here.
+Check their compatibility before restarting production applications.
+
+1. Verify the download
+----------------------
+Download the complete folder, including SHA256SUMS. From its top directory:
+
+  sha256sum -c SHA256SUMS
+
+Every file must report OK. Stop if any file is missing or fails verification.
+SHA256SUMS covers the packages and this installation guide.
+
+Compare the SHA256SUMS file's own digest with SHA256SUMS.sha256:
+
+  sha256sum -c SHA256SUMS.sha256
+
+A checksum downloaded from the same location can be replaced along with the
+packages. For authenticity, obtain the manifest digest independently from
+the publisher through a trusted channel. This download has no detached
+publisher signature. If you cannot trust the publisher or independently
+verify provenance, use your distribution/vendor's signed APT repository.
+Never disable APT signature verification to install these packages.
+
+2. Check the machine and save a rollback point
+--------------------------------------------
+Run in Bash:
+
+  dpkg --print-architecture
+  cat /etc/os-release
+  sudo dpkg --audit
+
+Expect arm64, ID=ubuntu, VERSION_ID="24.04", and VERSION_CODENAME=noble.
+Resolve any dpkg audit issues before proceeding.
+Take a VM/filesystem snapshot or obtain the previous exact .deb packages.
+A configuration backup alone cannot roll back upgraded binaries.
+Back up /etc/php, record installed versions and modules, and schedule any
+necessary FPM/application worker restarts. For example:
+
+  dpkg-query -W 'php*' > php-packages-before.txt
+  sudo tar -czf php-config-before.tar.gz /etc/php
+
+3. Select ONLY the packages already installed for one PHP branch
+--------------------------------------------------------------
+Do not install every .deb in a version folder. The build includes optional
+modules, development packages and different SAPIs you may not need.
+This example upgrades an existing PHP 8.5 installation. Replace 8.5 with
+8.1, 8.2, 8.3, or 8.4 as appropriate. Run the block in Bash, from the top
+of this download folder, after successful checksum verification:
+
+  v=8.5
+  selected=$(mktemp -d /tmp/php-built-selection.XXXXXX)
+  for f in "$PWD/$v/"*.deb; do
+    p=$(dpkg-deb -f "$f" Package) || break
+    status=$(dpkg-query -W -f='${db:Status-Status}' "$p" 2>/dev/null) || status=absent
+    if [ "$status" = installed ]; then
+      cp -- "$f" "$selected/"
+    fi
+  done
+  printf 'Selected packages: %s\n' "$selected"
+  ls -1 "$selected"
+
+This selects only matching installed package names. It does not select
+unbundled third-party extensions. Review each package and its metadata:
+
+  for f in "$selected/"*.deb; do
+    dpkg-deb -f "$f" Package Version Architecture
+  done
+
+Check your CLI and FPM configuration before installation:
+
+  php"$v" -v
+  php"$v" -m
+  sudo php-fpm"$v" -t
+
+Skip the FPM command if that SAPI is not installed. For Apache, also run
+apache2ctl -t. Keep the module output so you can compare it afterward.
+
+4. Simulate, review, then install
+--------------------------------
+In the SAME Bash session, with v and selected still set:
+
+  sudo apt-get -s --no-remove install "$selected/"*.deb
+
+Review the complete transaction. Do not proceed with unexpected packages,
+removals, downgrades, missing dependencies, or a different PHP branch.
+Do not force dependency failures with dpkg --force options. If required
+php-common or other libraries are unavailable, resolve them using a trusted,
+signed repository appropriate for your Ubuntu release.
+
+Once you have reviewed the exact transaction:
+
+  sudo apt-get --no-remove -o Dpkg::Options::=--force-confold install "$selected/"*.deb
+
+This command asks for confirmation. It preserves locally modified dpkg
+conffiles; still review any configuration prompts and the installation log.
+Package installation scripts may restart services during installation.
+Do not run a broad apt upgrade or apt autoremove as part of these steps.
+
+5. Validate and restart affected services
+----------------------------------------
+
+  php"$v" -v
+  php"$v" -m
+  sudo php-fpm"$v" -t
+  sudo dpkg --audit
+
+Compare modules and check application-specific extensions. If FPM's config
+test passes and the service was running before the update:
+
+  sudo systemctl restart php"$v"-fpm
+  systemctl is-active php"$v"-fpm
+
+For Apache mod_php, test the Apache configuration and restart Apache in
+your maintenance window. Restart only previously running queue/Octane/other
+persistent workers that use the upgraded system PHP. Keep intentionally
+stopped applications stopped. Do not restart all Supervisor programs.
+
+Check application health endpoints, logs, queues and actual web runtime.
+CLI php -v alone does not prove the web server is using the patched binary.
+FrankenPHP's embedded PHP requires a separate binary/image update.
+
+Future repository updates
+-------------------------
+These keep the source packaging's package names and versions. A compatible
+signed repository can provide future updates when it publishes a strictly
+newer version according to dpkg version ordering. An equal version will not
+be automatically reinstalled; a lower version requires an explicit downgrade.
+Review apt-cache policy and simulate future transactions before installing.
